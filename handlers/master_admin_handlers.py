@@ -1,7 +1,8 @@
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from config import Config
-from services.db_service import db, activate_pro_subscription
+from services.db_service import db
+from services.subscription import activate_pro_subscription
 from core.strings import Buttons
 
 router = Router()
