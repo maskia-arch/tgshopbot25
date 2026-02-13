@@ -4,6 +4,8 @@ import os
 import threading
 from flask import Flask
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.client.default import DefaultBotProperties
 from config import Config
 from bots.master_bot import router as master_router
 from bots.shop_logic import router as shop_router
@@ -17,6 +19,7 @@ def health():
     return "Bot is running", 200
 
 def run_flask():
+    # Render nutzt den Port 10000 oder weist dynamisch einen zu
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
@@ -32,23 +35,36 @@ async def main():
         logger.error("MASTER_BOT_TOKEN nicht gefunden! Abbruch.")
         return
 
-    bot = Bot(token=Config.MASTER_BOT_TOKEN)
-    dp = Dispatcher()
+    # FSM Speicher initialisieren (Zwingend notwendig für admin_handlers)
+    storage = MemoryStorage()
 
-    # Router registrieren
+    # Bot Instanz mit HTML-Support als Standard
+    bot = Bot(
+        token=Config.MASTER_BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode="HTML")
+    )
+    
+    # Dispatcher mit Speicher verknüpfen
+    dp = Dispatcher(storage=storage)
+
+    # Router registrieren - REIHENFOLGE IST ENTSCHEIDEND:
+    # Wir setzen die spezifischen Handler nach oben, damit sie Vorrang haben
+    dp.include_router(admin_router)
+    dp.include_router(payment_router)
+    dp.include_router(customer_router)
     dp.include_router(master_router)
     dp.include_router(shop_router)
-    dp.include_router(admin_router)
-    dp.include_router(customer_router)
-    dp.include_router(payment_router)
 
     logger.info(f"Own1Shop Version {Config.VERSION} wird gestartet...")
+    
+    # Verwirft alle alten Nachrichten, während der Bot offline war
+    await bot.delete_webhook(drop_pending_updates=True)
     
     # Startet das Polling
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    # Flask-Server in einem separaten Thread starten
+    # Flask-Server in einem separaten Thread starten für Render
     threading.Thread(target=run_flask, daemon=True).start()
     
     try:
