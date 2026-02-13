@@ -1,13 +1,16 @@
 class Buttons:
+    # Hauptmenü / Navigation
     MAIN_MENU = "🏠 Hauptmenü"
     ADMIN_MANAGE = "🛒 Meinen Test-Shop verwalten"
     VIEW_SHOP = "🛍 Eigenen Shop ansehen"
     UPGRADE_PRO = "💎 Upgrade auf Pro (10€/Monat)"
     
+    # Admin Bereich
     ADD_PRODUCT = "➕ Produkt hinzufügen"
     LIST_PRODUCTS = "📋 Meine Produkte"
     SETTINGS = "⚙️ Shop-Einstellungen / Zahlungsarten"
     
+    # Shop Einstellungen
     CONF_BOT = "⚙️ Shop-Bot konfigurieren"
     CHANGE_BTC = "Bitcoin (BTC) ändern"
     CHANGE_LTC = "Litecoin (LTC) ändern"
@@ -16,6 +19,7 @@ class Buttons:
     CHANGE_PAYPAL = "PayPal (F&F) ändern"
     OWN_BOT_TOKEN = "🤖 Eigener Bot-Token"
     
+    # Inline Buttons
     SKIP_STOCK = "⏭ Später auffüllen (Überspringen)"
     REFILL_STOCK = "➕ Lager auffüllen"
     DELETE_PRODUCT = "🗑 Löschen"
@@ -24,6 +28,7 @@ class Buttons:
     CONFIRM_PAYMENT = "✅ Zahlung erhalten (Ware senden)"
 
 class Messages:
+    # Dashboard & Admin
     WELCOME_BACK = "Willkommen bei **Own1Shop**! 🚀\n\nStatus: {status}\nShop-ID: `{shop_id}`"
     ADMIN_WELCOME = (
         "🛠 **Admin-Bereich**\n\n"
@@ -32,6 +37,7 @@ class Messages:
         "Verwalte hier deine Produkte, Zahlungsarten und Bestände."
     )
     
+    # Produkt Management
     ASK_PRODUCT_NAME = "Wie soll das Produkt heißen?"
     ASK_PRODUCT_DESC = "Gib eine kurze Beschreibung ein:"
     ASK_PRODUCT_PRICE = "Was soll es kosten? (z.B. 12.50)"
@@ -40,6 +46,7 @@ class Messages:
     REFILL_SUCCESS = "✅ Erfolgreich `{count}` Einheiten nachgefüllt!"
     LIMIT_REACHED = "⚠️ Limit erreicht! Im Free-Modus max. 2 Produkte. Upgrade auf Pro für unbegrenzt."
     
+    # Shop Einstellungen & Wallets
     SETTINGS_MENU = (
         "⚙️ **Shop-Einstellungen**\n\n"
         "Hier kannst du deine Zahlungsdaten hinterlegen, damit Kunden direkt an dich bezahlen.\n\n"
@@ -54,6 +61,7 @@ class Messages:
     TOKEN_PROMPT = "Bitte sende mir jetzt den **API-Token** deines Bots (vom @BotFather):"
     TOKEN_SUCCESS = "✅ **Token erfolgreich gespeichert!** Dein Shop wird nun konfiguriert."
     
+    # Zahlungen & Shop (Kundensicht)
     SHOP_WELCOME = "🏪 **Willkommen im Shop von {owner_name}**\n\nHier kannst du die verfügbaren Produkte durchstöbern."
     CATALOG_EMPTY = "📭 Dieser Shop hat aktuell keine Produkte im Angebot."
     PRODUCT_DETAILS = "📦 **{name}**\n\n📝 {desc}\n\n💰 Preis: {price}€\n🔢 Status: {stock}"
@@ -65,6 +73,7 @@ class Messages:
         "Sobald der Händler den Zahlungseingang bestätigt, wird dir die Ware automatisch zugestellt."
     )
     
+    # Benachrichtigung an Verkäufer
     NEW_ORDER_SELLER = (
         "🔔 **Neue Bestellung!**\n\n"
         "Kunde: @{username} (`{user_id}`)\n"

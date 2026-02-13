@@ -23,7 +23,6 @@ async def get_user_by_id(telegram_id: int):
     return None
 
 async def get_user_by_shop_id(shop_id: str):
-    # Wandelt die ID in Großbuchstaben um, um Fehler bei der Eingabe zu vermeiden
     response = db.table("profiles").select("*").eq("shop_id", shop_id.upper()).execute()
     return response.data[0] if response.data else None
 
@@ -56,7 +55,7 @@ async def get_user_products(owner_id: int):
         response = db.table("products").select("*").eq("owner_id", int(owner_id)).execute()
         return response.data
     except Exception as e:
-        print(f"Fehler beim Abrufen der Produkte: {e}")
+        print(f"Error: {e}")
         return []
 
 async def add_product(owner_id: int, name: str, price: float, content: str, description: str = ""):
@@ -85,7 +84,7 @@ async def refill_stock(product_id, owner_id: int, new_content: str):
             db.table("products").update({"content": updated_content}).eq("id", query_id).execute()
             return len(items)
     except Exception as e:
-        print(f"Fehler beim Auffüllen: {e}")
+        print(f"Error: {e}")
     return 0
 
 async def get_stock_count(product_id):
@@ -105,7 +104,7 @@ async def delete_product(product_id, owner_id: int):
         db.table("products").delete().eq("id", query_id).eq("owner_id", int(owner_id)).execute()
         return True
     except Exception as e:
-        print(f"Löschfehler: {e}")
+        print(f"Error: {e}")
         return False
 
 async def confirm_order(order_id: str):
@@ -147,9 +146,7 @@ async def create_order(buyer_id: int, product_id, seller_id: int):
     return response.data[0] if response.data else None
 
 async def get_shop_customers(seller_id: int):
-    """Holt alle einzigartigen Kunden-IDs, die jemals bei diesem Verkäufer bestellt haben."""
     response = db.table("orders").select("buyer_id").eq("seller_id", int(seller_id)).execute()
     if response.data:
-        # Erstellt ein Set aus IDs, um Duplikate zu vermeiden
         return list(set(item['buyer_id'] for item in response.data))
     return []
