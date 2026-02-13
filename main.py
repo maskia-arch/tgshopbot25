@@ -48,6 +48,7 @@ async def start_customer_bots(main_dispatcher: Dispatcher):
                     default=DefaultBotProperties(parse_mode="HTML")
                 )
                 await customer_bot.delete_webhook(drop_pending_updates=True)
+                await asyncio.sleep(0.5)
                 asyncio.create_task(main_dispatcher.start_polling(customer_bot))
                 logger.info(f"✅ Externer Shop-Bot für User {shop['id']} gestartet.")
             except Exception as e:
@@ -81,11 +82,12 @@ async def main():
     logger.info(f"Own1Shop Version {Config.VERSION} wird gestartet...")
 
     await master_bot.delete_webhook(drop_pending_updates=True)
+    await asyncio.sleep(2)
 
     await start_customer_bots(dp)
 
     logger.info("Master-Bot Polling aktiv.")
-    await dp.start_polling(master_bot)
+    await dp.start_polling(master_bot, skip_updates=True)
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
