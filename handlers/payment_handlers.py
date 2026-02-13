@@ -1,5 +1,5 @@
 from aiogram import Router, types, F
-from aiogram.filters import Command  # WICHTIG: Dieser Import hat gefehlt
+from aiogram.filters import Command  # <--- DIESE ZEILE HAT GEFEHLT!
 from services.db_service import get_user_by_id
 from services.subscription import activate_pro_subscription
 from config import Config
@@ -34,7 +34,6 @@ async def show_upgrade_options(message: types.Message):
 
 @router.callback_query(F.data == "pay_ltc")
 async def pay_ltc_info(callback: types.CallbackQuery):
-    # Hier würdest du deine echte Wallet-Adresse hinterlegen
     wallet_address = "DEINE_LTC_WALLET_ADRESSE"
     
     await callback.message.answer(
@@ -47,7 +46,6 @@ async def pay_ltc_info(callback: types.CallbackQuery):
 
 @router.message(Command("grantpro"))
 async def admin_grant_pro(message: types.Message):
-    # Nur Admins aus der Config dürfen diesen Befehl nutzen
     if message.from_user.id not in Config.ADMIN_IDS:
         return
 
@@ -61,16 +59,15 @@ async def admin_grant_pro(message: types.Message):
         await activate_pro_subscription(target_id)
         await message.answer(f"✅ User {target_id} wurde für 30 Tage auf PRO gesetzt.")
         
-        # Den User benachrichtigen
         try:
             await message.bot.send_message(
                 target_id, 
                 f"🎉 Dein Upgrade auf **{Config.BRAND_NAME} Pro** wurde aktiviert!"
             )
         except Exception:
-            await message.answer("User wurde geupgradet, konnte aber nicht benachrichtigt werden (Bot blockiert?).")
+            await message.answer("User wurde geupgradet, konnte aber nicht benachrichtigt werden.")
             
     except ValueError:
         await message.answer("Fehler: Die Telegram_ID muss eine Zahl sein.")
     except Exception as e:
-        await message.answer(f"Unerwarteter Fehler: {e}")
+        await message.answer(f"Fehler: {e}")
