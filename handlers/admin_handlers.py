@@ -33,6 +33,7 @@ async def admin_menu(message: types.Message):
     kb = [
         [types.KeyboardButton(text="➕ Produkt hinzufügen")],
         [types.KeyboardButton(text="📋 Meine Produkte")],
+        [types.KeyboardButton(text="⚙️ Shop-Einstellungen / Zahlungsarten")],
         [types.KeyboardButton(text="🏠 Hauptmenü")]
     ]
     keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
@@ -41,7 +42,7 @@ async def admin_menu(message: types.Message):
         "🛠 **Admin-Bereich**\n\n"
         f"🆔 Deine Shop-ID: `{shop_id}`\n"
         f"🔗 Kunden-Link: [Hier klicken]({shop_link})\n\n"
-        "Verwalte hier deine Produkte, Bestände und Verkäufe."
+        "Verwalte hier deine Produkte, Zahlungsarten und Bestände."
     )
     
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)

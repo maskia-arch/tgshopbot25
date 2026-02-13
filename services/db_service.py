@@ -43,6 +43,9 @@ async def create_new_user(telegram_id: int, username: str):
 async def update_user_token(telegram_id: int, token: str):
     db.table("profiles").update({"custom_bot_token": token}).eq("id", telegram_id).execute()
 
+async def update_payment_methods(telegram_id: int, payment_data: dict):
+    db.table("profiles").update(payment_data).eq("id", telegram_id).execute()
+
 async def get_user_products(owner_id: int):
     try:
         response = db.table("products").select("*").eq("owner_id", int(owner_id)).execute()

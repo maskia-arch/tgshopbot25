@@ -1,78 +1,98 @@
 from aiogram import Router, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from services.db_service import get_user_by_id, update_user_token
+from services.db_service import get_user_by_id, update_user_token, update_payment_methods
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 router = Router()
 
-# Definition der Zustände für die Token-Eingabe
-class TokenForm(StatesGroup):
+class ShopSettingsForm(StatesGroup):
     waiting_for_token = State()
+    waiting_for_wallet = State()
 
+@router.message(F.text == "⚙️ Shop-Einstellungen / Zahlungsarten")
 @router.message(F.text == "⚙️ Shop-Bot konfigurieren")
-async def start_token_config(message: types.Message, state: FSMContext):
-    """Startet den Prozess der Token-Hinterlegung für Pro-User."""
+async def show_settings_menu(message: types.Message):
     user = await get_user_by_id(message.from_user.id)
+    if not user: return
+
+    is_pro = user.get("is_pro", False)
     
-    # Sicherheitscheck: Nur Pro-User dürfen konfigurieren
-    if not user or not user.get("is_pro"):
-        await message.answer(
-            "⚠️ **Feature gesperrt**\n\n"
-            "Das Hinterlegen eines eigenen Bot-Tokens ist ein 💎 **PRO-Feature**.\n"
-            "Bitte führe zuerst ein Upgrade durch.",
-            parse_mode="Markdown"
-        )
-        return
-
-    current_token = user.get("custom_bot_token")
-    token_display = f"`{current_token[:10]}...`" if current_token else "`Keiner hinterlegt`"
-
-    await state.set_state(TokenForm.waiting_for_token)
-    
-    kb = [[types.KeyboardButton(text="🏠 Hauptmenü")]]
-    keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
-
-    await message.answer(
-        f"🛠 **Shop-Bot Konfiguration**\n\n"
-        f"Aktueller Status: {token_display}\n\n"
-        "Bitte sende mir jetzt den **API-Token** deines Bots.\n"
-        "Diesen erhältst du beim @BotFather.\n\n"
-        "💡 _Dein Shop wird nach dem Speichern automatisch über diesen Bot erreichbar sein._",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
+    text = (
+        "⚙️ **Shop-Einstellungen**\n\n"
+        "Hier kannst du deine Zahlungsdaten hinterlegen, damit Kunden direkt an dich bezahlen.\n\n"
+        "**Verfügbare Methoden:**\n"
+        f"• BTC: `{user.get('wallet_btc') or 'Nicht hinterlegt'}`\n"
+        f"• LTC: `{user.get('wallet_ltc') or 'Nicht hinterlegt'}`\n"
     )
 
-@router.message(TokenForm.waiting_for_token)
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="Bitcoin (BTC) ändern", callback_data="set_pay_wallet_btc"))
+    builder.row(types.InlineKeyboardButton(text="Litecoin (LTC) ändern", callback_data="set_pay_wallet_ltc"))
+
+    if is_pro:
+        text += (
+            f"• ETH: `{user.get('wallet_eth') or 'Nicht hinterlegt'}`\n"
+            f"• SOL: `{user.get('wallet_sol') or 'Nicht hinterlegt'}`\n"
+            f"• PayPal: `{user.get('paypal_email') or 'Nicht hinterlegt'}`\n"
+        )
+        builder.row(types.InlineKeyboardButton(text="Ethereum (ETH) ändern", callback_data="set_pay_wallet_eth"))
+        builder.row(types.InlineKeyboardButton(text="Solana (SOL) ändern", callback_data="set_pay_wallet_sol"))
+        builder.row(types.InlineKeyboardButton(text="PayPal (F&F) ändern", callback_data="set_pay_paypal_email"))
+        builder.row(types.InlineKeyboardButton(text="🤖 Eigener Bot-Token", callback_data="start_token_config"))
+    else:
+        text += "\n💎 _Upgrade auf PRO für ETH, SOL, PayPal & eigenen Bot-Token._"
+
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+@router.callback_query(F.data.startswith("set_pay_"))
+async def start_wallet_update(callback: types.CallbackQuery, state: FSMContext):
+    field = callback.data.replace("set_pay_", "")
+    names = {"wallet_btc": "Bitcoin (BTC)", "wallet_ltc": "Litecoin (LTC)", "wallet_eth": "Ethereum (ETH)", "wallet_sol": "Solana (SOL)", "paypal_email": "PayPal (F&F) Email"}
+    
+    await state.update_data(current_field=field)
+    await state.set_state(ShopSettingsForm.waiting_for_wallet)
+    
+    await callback.message.answer(f"Bitte sende mir jetzt deine Adresse/Email für **{names.get(field)}**:")
+    await callback.answer()
+
+@router.message(ShopSettingsForm.waiting_for_wallet)
+async def process_wallet_input(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    field = data.get("current_field")
+    value = message.text.strip()
+
+    if message.text == "🏠 Hauptmenü":
+        await state.clear()
+        return
+
+    try:
+        await update_payment_methods(message.from_user.id, {field: value})
+        await state.clear()
+        await message.answer(f"✅ **Gespeichert!** Deine Zahlungsdaten wurden aktualisiert.")
+    except Exception as e:
+        await message.answer(f"❌ Fehler: {e}")
+
+@router.callback_query(F.data == "start_token_config")
+async def start_token_config(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(ShopSettingsForm.waiting_for_token)
+    await callback.message.answer("Bitte sende mir jetzt den **API-Token** deines Bots (vom @BotFather):")
+    await callback.answer()
+
+@router.message(ShopSettingsForm.waiting_for_token)
 async def process_token(message: types.Message, state: FSMContext):
-    """Verarbeitet den eingesendeten Token und speichert ihn in der DB."""
-    # Falls der User das Hauptmenü wählt, brechen wir ab
     if message.text == "🏠 Hauptmenü":
         await state.clear()
         return
 
     token = message.text.strip()
-    
-    # Validierung: Ein Telegram Token hat immer ein ':' und eine gewisse Länge
     if ":" not in token or len(token) < 30:
-        await message.answer(
-            "❌ **Ungültiger Token**\n\n"
-            "Das Format scheint nicht korrekt zu sein. Ein Bot-Token sieht etwa so aus:\n"
-            "`123456789:ABCDefghIJKLmnop...`",
-            parse_mode="Markdown"
-        )
+        await message.answer("❌ Ungültiger Token-Format.")
         return
 
-    # In der Datenbank speichern
     try:
         await update_user_token(message.from_user.id, token)
         await state.clear()
-        
-        await message.answer(
-            "✅ **Token erfolgreich gespeichert!**\n\n"
-            "Dein eigener Shop-Bot wird nun vom System gestartet.\n"
-            "Du kannst deine Produkte weiterhin hier im Admin-Panel verwalten.",
-            parse_mode="Markdown"
-        )
+        await message.answer("✅ **Token erfolgreich gespeichert!**")
     except Exception as e:
-        await message.answer(f"❌ Fehler beim Speichern: {e}")
-
+        await message.answer(f"❌ Fehler: {e}")
