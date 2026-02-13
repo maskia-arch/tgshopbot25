@@ -61,28 +61,34 @@ async def start_purchase(callback: types.CallbackQuery):
     )
     
     if order:
-        # Verkäufer-Profil laden, um dessen Wallets anzuzeigen
         seller = await get_user_by_id(seller_id)
         
         payment_text = "✅ **Bestellung eingeleitet!**\n\nBitte sende den Betrag an eine der folgenden Adressen:\n\n"
         
-        # Dynamische Anzeige der hinterlegten Wallets des Verkäufers
+        has_payment = False
         if seller.get("wallet_btc"):
             payment_text += f"₿ **BTC:** `{seller['wallet_btc']}`\n"
+            has_payment = True
         if seller.get("wallet_ltc"):
             payment_text += f"Ł **LTC:** `{seller['wallet_ltc']}`\n"
+            has_payment = True
         if seller.get("wallet_eth"):
             payment_text += f"Ξ **ETH:** `{seller['wallet_eth']}`\n"
+            has_payment = True
         if seller.get("wallet_sol"):
             payment_text += f"◎ **SOL:** `{seller['wallet_sol']}`\n"
+            has_payment = True
         if seller.get("paypal_email"):
             payment_text += f"🅿️ **PayPal (F&F):** `{seller['paypal_email']}`\n"
+            has_payment = True
             
-        payment_text += "\nSobald der Händler den Zahlungseingang bestätigt, wird dir die Ware automatisch zugestellt."
+        if not has_payment:
+            payment_text = "⚠️ Der Verkäufer hat noch keine Zahlungsmethoden hinterlegt. Bitte kontaktiere ihn direkt."
+        else:
+            payment_text += "\nSobald der Händler den Zahlungseingang bestätigt, wird dir die Ware automatisch zugestellt."
         
         await callback.message.answer(payment_text, parse_mode="Markdown")
         
-        # Benachrichtigung an den Verkäufer
         confirm_kb = [
             [types.InlineKeyboardButton(
                 text=Buttons.CONFIRM_PAYMENT, 
@@ -96,7 +102,8 @@ async def start_purchase(callback: types.CallbackQuery):
             text=Messages.NEW_ORDER_SELLER.format(
                 username=callback.from_user.username or 'Unbekannt',
                 user_id=callback.from_user.id,
-                product_name=product_id # Hier könnte man noch den echten Namen laden
+                product_id=product_id,
+                order_id=order['id']
             ),
             reply_markup=confirm_keyboard,
             parse_mode="Markdown"

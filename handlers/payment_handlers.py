@@ -1,12 +1,12 @@
 from aiogram import Router, types, F
-from aiogram.filters import Command
 from services.db_service import get_user_by_id
 from services.subscription import activate_pro_subscription
 from config import Config
+from core.strings import Buttons, Messages
 
 router = Router()
 
-@router.message(F.text == "💎 Upgrade auf Pro (10€/Monat)")
+@router.message(F.text == Buttons.UPGRADE_PRO)
 async def show_upgrade_options(message: types.Message):
     user = await get_user_by_id(message.from_user.id)
     
@@ -34,10 +34,15 @@ async def show_upgrade_options(message: types.Message):
 
 @router.callback_query(F.data == "pay_ltc")
 async def pay_ltc_info(callback: types.CallbackQuery):
-    # Deine hinterlegte Adresse
     wallet = "ltc1q73t84vd9mj4yt2pkgmtx8cfmductgf8ds87dm5"
     
-    # Benachrichtigung an den Admin (Dich) über das Interesse
+    confirm_kb = [
+        [types.InlineKeyboardButton(
+            text=f"✅ Zahlung bestätigen (ID: {callback.from_user.id})", 
+            callback_data=f"admin_confirm_pro_{callback.from_user.id}"
+        )]
+    ]
+    
     for admin_id in Config.ADMIN_IDS:
         try:
             await callback.bot.send_message(
@@ -48,6 +53,7 @@ async def pay_ltc_info(callback: types.CallbackQuery):
                     f"ID: `{callback.from_user.id}`\n"
                     f"Hat soeben die LTC-Zahlungsdaten angefordert."
                 ),
+                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=confirm_kb),
                 parse_mode="Markdown"
             )
         except Exception:
@@ -63,6 +69,32 @@ async def pay_ltc_info(callback: types.CallbackQuery):
     )
     await callback.answer()
 
+@router.callback_query(F.data.startswith("admin_confirm_pro_"))
+async def process_admin_confirm_pro(callback: types.CallbackQuery):
+    if callback.from_user.id not in Config.ADMIN_IDS:
+        await callback.answer("Keine Berechtigung.", show_alert=True)
+        return
+
+    target_id = int(callback.data.split("_")[-1])
+    
+    try:
+        await activate_pro_subscription(target_id)
+        
+        await callback.message.edit_text(
+            f"{callback.message.text}\n\n✅ **Bestätigt! User {target_id} ist jetzt PRO.**",
+            parse_mode="Markdown"
+        )
+        
+        await callback.bot.send_message(
+            target_id, 
+            f"🎉 Dein Upgrade auf **{Config.BRAND_NAME} Pro** wurde soeben aktiviert!\n"
+            "Du kannst jetzt unbegrenzt Produkte anlegen und deinen eigenen Bot-Token nutzen."
+        )
+        await callback.answer("User erfolgreich freigeschaltet!")
+        
+    except Exception as e:
+        await callback.answer(f"Fehler: {e}", show_alert=True)
+
 @router.callback_query(F.data == "pay_fiat")
 async def pay_fiat_info(callback: types.CallbackQuery):
     await callback.message.answer(
@@ -70,36 +102,3 @@ async def pay_fiat_info(callback: types.CallbackQuery):
         "Schreibe dazu einfach an den Admin."
     )
     await callback.answer()
-
-@router.message(Command("grantpro"))
-async def admin_grant_pro(message: types.Message):
-    """Admin-Befehl um User manuell freizuschalten."""
-    if message.from_user.id not in Config.ADMIN_IDS:
-        return
-
-    args = message.text.split()
-    if len(args) < 2:
-        await message.answer("Nutze: `/grantpro [Telegram_ID]`", parse_mode="Markdown")
-        return
-
-    try:
-        target_id = int(args[1])
-        # Funktion aus subscription.py
-        await activate_pro_subscription(target_id)
-        
-        await message.answer(f"✅ User `{target_id}` wurde erfolgreich auf PRO gesetzt.", parse_mode="Markdown")
-        
-        # Benachrichtigung an den Kunden
-        try:
-            await message.bot.send_message(
-                target_id, 
-                f"🎉 Dein Upgrade auf **{Config.BRAND_NAME} Pro** wurde soeben aktiviert!\n"
-                "Du kannst jetzt unbegrenzt Produkte anlegen und deinen eigenen Bot-Token nutzen."
-            )
-        except Exception:
-            await message.answer("User wurde geupgradet, konnte aber nicht benachrichtigt werden (Bot geblockt?).")
-            
-    except ValueError:
-        await message.answer("Fehler: Die Telegram_ID muss eine Zahl sein.")
-    except Exception as e:
-        await message.answer(f"Fehler: {e}")
