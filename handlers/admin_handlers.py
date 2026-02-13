@@ -11,7 +11,6 @@ from core.supabase_client import db
 
 router = Router()
 
-# States für Produkt-Erstellung und Refill
 class ProductForm(StatesGroup):
     name = State()
     description = State()
@@ -25,9 +24,7 @@ class RefillForm(StatesGroup):
 @router.message(F.text == "🛒 Meinen Test-Shop verwalten")
 @router.message(Command("admin"))
 async def admin_menu(message: types.Message):
-    """Zeigt das Admin-Panel mit der persönlichen Shop-ID und dem Kunden-Link."""
     user = await get_user_by_id(message.from_user.id)
-    # Shop-ID wird im db_service automatisch nachgeneriert, falls sie fehlt
     shop_id = user.get("shop_id", "Wird generiert...")
     bot_info = await message.bot.get_me()
     
@@ -49,7 +46,6 @@ async def admin_menu(message: types.Message):
     
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
 
-# --- PRODUKT HINZUFÜGEN ---
 @router.message(F.text == "➕ Produkt hinzufügen")
 async def start_add_product(message: types.Message, state: FSMContext):
     if not await can_add_product(message.from_user.id):
@@ -126,10 +122,8 @@ async def process_content(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(f"✅ Produkt **{data['name']}** wurde erstellt!")
 
-# --- PRODUKTE VERWALTEN ---
 @router.message(F.text == "📋 Meine Produkte")
 async def list_admin_products(message: types.Message):
-    """Ruft die Produkte ab und zeigt sie mit funktionierenden Inline-Buttons an."""
     products = await get_user_products(message.from_user.id)
     if not products:
         await message.answer("Du hast noch keine Produkte angelegt.")
@@ -143,7 +137,6 @@ async def list_admin_products(message: types.Message):
             f"💰 Preis: {p['price']}€\n"
             f"🔢 Lagerbestand: `{stock}`"
         )
-        # IDs werden hier als String im Callback übergeben, im Handler zu int konvertiert
         kb = [
             [types.InlineKeyboardButton(text="➕ Lager auffüllen", callback_data=f"refill_{p_id}")],
             [types.InlineKeyboardButton(text="🗑 Löschen", callback_data=f"delete_{p_id}")]
@@ -153,12 +146,12 @@ async def list_admin_products(message: types.Message):
 @router.callback_query(F.data.startswith("refill_"))
 async def start_refill(callback: types.CallbackQuery, state: FSMContext):
     try:
-        product_id = int(callback.data.split("_")[1])
+        product_id = callback.data.split("_")[1]
         await state.update_data(refill_id=product_id)
         await state.set_state(RefillForm.content)
         await callback.message.answer("📥 Sende nun die neuen Daten (`mail:pass` oder eine pro Zeile):")
         await callback.answer()
-    except (ValueError, IndexError):
+    except Exception:
         await callback.answer("Fehler beim Identifizieren des Produkts.", show_alert=True)
 
 @router.message(RefillForm.content)
@@ -175,16 +168,15 @@ async def process_refill_content(message: types.Message, state: FSMContext):
 @router.callback_query(F.data.startswith("delete_"))
 async def process_delete_product(callback: types.CallbackQuery):
     try:
-        product_id = int(callback.data.split("_")[1])
+        product_id = callback.data.split("_")[1]
         await delete_product(product_id, callback.from_user.id)
         await callback.message.delete()
         await callback.answer("✅ Produkt gelöscht.")
-    except (ValueError, IndexError):
+    except Exception:
         await callback.answer("Fehler beim Löschen des Produkts.", show_alert=True)
 
 @router.callback_query(F.data.startswith("confirm_"))
 async def process_confirm_sale(callback: types.CallbackQuery):
-    """Handler für die Verkaufsbestätigung (Zahlungserhalt)."""
     try:
         order_id = callback.data.split("_")[1]
         order_res = db.table("orders").select("*").eq("id", order_id).single().execute()
