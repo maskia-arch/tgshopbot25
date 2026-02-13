@@ -3,6 +3,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from services.db_service import get_user_by_id, update_user_token, update_payment_methods
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from core.strings import Buttons
 
 router = Router()
 
@@ -10,8 +11,8 @@ class ShopSettingsForm(StatesGroup):
     waiting_for_token = State()
     waiting_for_wallet = State()
 
-@router.message(F.text == "⚙️ Shop-Einstellungen / Zahlungsarten")
-@router.message(F.text == "⚙️ Shop-Bot konfigurieren")
+@router.message(F.text == Buttons.SETTINGS)
+@router.message(F.text == Buttons.CONF_BOT)
 async def show_settings_menu(message: types.Message):
     user = await get_user_by_id(message.from_user.id)
     if not user: return
@@ -27,8 +28,8 @@ async def show_settings_menu(message: types.Message):
     )
 
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="Bitcoin (BTC) ändern", callback_data="set_pay_wallet_btc"))
-    builder.row(types.InlineKeyboardButton(text="Litecoin (LTC) ändern", callback_data="set_pay_wallet_ltc"))
+    builder.row(types.InlineKeyboardButton(text=Buttons.CHANGE_BTC, callback_data="set_pay_wallet_btc"))
+    builder.row(types.InlineKeyboardButton(text=Buttons.CHANGE_LTC, callback_data="set_pay_wallet_ltc"))
 
     if is_pro:
         text += (
@@ -36,10 +37,10 @@ async def show_settings_menu(message: types.Message):
             f"• SOL: `{user.get('wallet_sol') or 'Nicht hinterlegt'}`\n"
             f"• PayPal: `{user.get('paypal_email') or 'Nicht hinterlegt'}`\n"
         )
-        builder.row(types.InlineKeyboardButton(text="Ethereum (ETH) ändern", callback_data="set_pay_wallet_eth"))
-        builder.row(types.InlineKeyboardButton(text="Solana (SOL) ändern", callback_data="set_pay_wallet_sol"))
-        builder.row(types.InlineKeyboardButton(text="PayPal (F&F) ändern", callback_data="set_pay_paypal_email"))
-        builder.row(types.InlineKeyboardButton(text="🤖 Eigener Bot-Token", callback_data="start_token_config"))
+        builder.row(types.InlineKeyboardButton(text=Buttons.CHANGE_ETH, callback_data="set_pay_wallet_eth"))
+        builder.row(types.InlineKeyboardButton(text=Buttons.CHANGE_SOL, callback_data="set_pay_wallet_sol"))
+        builder.row(types.InlineKeyboardButton(text=Buttons.CHANGE_PAYPAL, callback_data="set_pay_paypal_email"))
+        builder.row(types.InlineKeyboardButton(text=Buttons.OWN_BOT_TOKEN, callback_data="start_token_config"))
     else:
         text += "\n💎 _Upgrade auf PRO für ETH, SOL, PayPal & eigenen Bot-Token._"
 
@@ -48,7 +49,13 @@ async def show_settings_menu(message: types.Message):
 @router.callback_query(F.data.startswith("set_pay_"))
 async def start_wallet_update(callback: types.CallbackQuery, state: FSMContext):
     field = callback.data.replace("set_pay_", "")
-    names = {"wallet_btc": "Bitcoin (BTC)", "wallet_ltc": "Litecoin (LTC)", "wallet_eth": "Ethereum (ETH)", "wallet_sol": "Solana (SOL)", "paypal_email": "PayPal (F&F) Email"}
+    names = {
+        "wallet_btc": "Bitcoin (BTC)", 
+        "wallet_ltc": "Litecoin (LTC)", 
+        "wallet_eth": "Ethereum (ETH)", 
+        "wallet_sol": "Solana (SOL)", 
+        "paypal_email": "PayPal (F&F) Email"
+    }
     
     await state.update_data(current_field=field)
     await state.set_state(ShopSettingsForm.waiting_for_wallet)
@@ -58,20 +65,20 @@ async def start_wallet_update(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(ShopSettingsForm.waiting_for_wallet)
 async def process_wallet_input(message: types.Message, state: FSMContext):
+    if message.text == Buttons.MAIN_MENU:
+        await state.clear()
+        return
+
     data = await state.get_data()
     field = data.get("current_field")
     value = message.text.strip()
 
-    if message.text == "🏠 Hauptmenü":
-        await state.clear()
-        return
-
     try:
         await update_payment_methods(message.from_user.id, {field: value})
         await state.clear()
-        await message.answer(f"✅ **Gespeichert!** Deine Zahlungsdaten wurden aktualisiert.")
+        await message.answer(f"✅ **Gespeichert!** Deine Zahlungsdaten für dieses Feld wurden aktualisiert.")
     except Exception as e:
-        await message.answer(f"❌ Fehler: {e}")
+        await message.answer(f"❌ Fehler beim Speichern: {e}")
 
 @router.callback_query(F.data == "start_token_config")
 async def start_token_config(callback: types.CallbackQuery, state: FSMContext):
@@ -81,18 +88,18 @@ async def start_token_config(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(ShopSettingsForm.waiting_for_token)
 async def process_token(message: types.Message, state: FSMContext):
-    if message.text == "🏠 Hauptmenü":
+    if message.text == Buttons.MAIN_MENU:
         await state.clear()
         return
 
     token = message.text.strip()
     if ":" not in token or len(token) < 30:
-        await message.answer("❌ Ungültiger Token-Format.")
+        await message.answer("❌ Ungültiges Token-Format. Ein Token sieht etwa so aus: `12345:ABCDE...`")
         return
 
     try:
         await update_user_token(message.from_user.id, token)
         await state.clear()
-        await message.answer("✅ **Token erfolgreich gespeichert!**")
+        await message.answer("✅ **Token erfolgreich gespeichert!** Dein Shop wird nun konfiguriert.")
     except Exception as e:
-        await message.answer(f"❌ Fehler: {e}")
+        await message.answer(f"❌ Fehler beim Speichern des Tokens: {e}")

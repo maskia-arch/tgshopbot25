@@ -8,6 +8,7 @@ from services.db_service import (
 )
 from core.validator import can_add_product
 from core.supabase_client import db
+from core.strings import Buttons, Messages
 
 router = Router()
 
@@ -21,7 +22,7 @@ class RefillForm(StatesGroup):
     product_id = State()
     content = State()
 
-@router.message(F.text == "🛒 Meinen Test-Shop verwalten")
+@router.message(F.text == Buttons.ADMIN_MANAGE)
 @router.message(Command("admin"))
 async def admin_menu(message: types.Message):
     user = await get_user_by_id(message.from_user.id)
@@ -31,42 +32,37 @@ async def admin_menu(message: types.Message):
     shop_link = f"https://t.me/{bot_info.username}?start={shop_id}"
 
     kb = [
-        [types.KeyboardButton(text="➕ Produkt hinzufügen")],
-        [types.KeyboardButton(text="📋 Meine Produkte")],
-        [types.KeyboardButton(text="⚙️ Shop-Einstellungen / Zahlungsarten")],
-        [types.KeyboardButton(text="🏠 Hauptmenü")]
+        [types.KeyboardButton(text=Buttons.ADD_PRODUCT)],
+        [types.KeyboardButton(text=Buttons.LIST_PRODUCTS)],
+        [types.KeyboardButton(text=Buttons.SETTINGS)],
+        [types.KeyboardButton(text=Buttons.MAIN_MENU)]
     ]
     keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
     
-    text = (
-        "🛠 **Admin-Bereich**\n\n"
-        f"🆔 Deine Shop-ID: `{shop_id}`\n"
-        f"🔗 Kunden-Link: [Hier klicken]({shop_link})\n\n"
-        "Verwalte hier deine Produkte, Zahlungsarten und Bestände."
-    )
+    text = Messages.ADMIN_WELCOME.format(shop_id=shop_id, shop_link=shop_link)
     
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
 
-@router.message(F.text == "➕ Produkt hinzufügen")
+@router.message(F.text == Buttons.ADD_PRODUCT)
 async def start_add_product(message: types.Message, state: FSMContext):
     if not await can_add_product(message.from_user.id):
-        await message.answer("⚠️ Limit erreicht! Im Free-Modus max. 2 Produkte. Upgrade auf Pro für unbegrenzt.")
+        await message.answer(Messages.LIMIT_REACHED)
         return
     
     await state.set_state(ProductForm.name)
-    await message.answer("Wie soll das Produkt heißen?")
+    await message.answer(Messages.ASK_PRODUCT_NAME)
 
 @router.message(ProductForm.name)
 async def process_name(message: types.Message, state: FSMContext):
     await state.update_data(name=message.text)
     await state.set_state(ProductForm.description)
-    await message.answer("Gib eine kurze Beschreibung ein:")
+    await message.answer(Messages.ASK_PRODUCT_DESC)
 
 @router.message(ProductForm.description)
 async def process_description(message: types.Message, state: FSMContext):
     await state.update_data(description=message.text)
     await state.set_state(ProductForm.price)
-    await message.answer("Was soll es kosten? (z.B. 12.50)")
+    await message.answer(Messages.ASK_PRODUCT_PRICE)
 
 @router.message(ProductForm.price)
 async def process_price(message: types.Message, state: FSMContext):
@@ -75,7 +71,7 @@ async def process_price(message: types.Message, state: FSMContext):
         await state.update_data(price=price)
         await state.set_state(ProductForm.content)
         
-        kb = [[types.InlineKeyboardButton(text="⏭ Später auffüllen (Überspringen)", callback_data="skip_stock")]]
+        kb = [[types.InlineKeyboardButton(text=Buttons.SKIP_STOCK, callback_data="skip_stock")]]
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=kb)
         
         await message.answer(
@@ -121,9 +117,9 @@ async def process_content(message: types.Message, state: FSMContext):
         description=data['description']
     )
     await state.clear()
-    await message.answer(f"✅ Produkt **{data['name']}** wurde erstellt!")
+    await message.answer(Messages.PRODUCT_ADDED.format(name=data['name']))
 
-@router.message(F.text == "📋 Meine Produkte")
+@router.message(F.text == Buttons.LIST_PRODUCTS)
 async def list_admin_products(message: types.Message):
     products = await get_user_products(message.from_user.id)
     if not products:
@@ -139,8 +135,8 @@ async def list_admin_products(message: types.Message):
             f"🔢 Lagerbestand: `{stock}`"
         )
         kb = [
-            [types.InlineKeyboardButton(text="➕ Lager auffüllen", callback_data=f"refill_{p_id}")],
-            [types.InlineKeyboardButton(text="🗑 Löschen", callback_data=f"delete_{p_id}")]
+            [types.InlineKeyboardButton(text=Buttons.REFILL_STOCK, callback_data=f"refill_{p_id}")],
+            [types.InlineKeyboardButton(text=Buttons.DELETE_PRODUCT, callback_data=f"delete_{p_id}")]
         ]
         await message.answer(text, reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
 
@@ -150,7 +146,7 @@ async def start_refill(callback: types.CallbackQuery, state: FSMContext):
         product_id = callback.data.split("_")[1]
         await state.update_data(refill_id=product_id)
         await state.set_state(RefillForm.content)
-        await callback.message.answer("📥 Sende nun die neuen Daten (`mail:pass` oder eine pro Zeile):")
+        await callback.message.answer(Messages.STOCK_REFILL_PROMPT)
         await callback.answer()
     except Exception:
         await callback.answer("Fehler beim Identifizieren des Produkts.", show_alert=True)
