@@ -1,13 +1,12 @@
 from aiogram import Router, types, F
-from services.db_service import get_user_products, create_order
+from services.db_service import get_user_products, create_order, get_stock_count
 from config import Config
 
 router = Router()
 
 @router.message(F.text == "🛍 Shop durchsuchen")
 async def browse_shop(message: types.Message):
-    # In einem realen Szenario müssten wir hier die owner_id des Shop-Besitzers kennen
-    # Für den Test-Modus im Master-Bot nutzen wir die ID des Users selbst
+    # Für den Test-Modus nutzen wir die ID des Users selbst als Shop-Besitzer
     products = await get_user_products(message.from_user.id)
     
     if not products:
@@ -15,18 +14,32 @@ async def browse_shop(message: types.Message):
         return
 
     for product in products:
+        # Lagerbestand für dieses Produkt abrufen
+        stock_count = await get_stock_count(product['id'])
+        
+        # Status-Text für den Bestand
+        stock_text = f"✅ Auf Lager: `{stock_count}`" if stock_count > 0 else "❌ Aktuell ausverkauft"
+        
         caption = (
             f"📦 **{product['name']}**\n\n"
             f"📝 {product['description']}\n\n"
-            f"💰 Preis: {product['price']}€"
+            f"💰 Preis: {product['price']}€\n"
+            f"🔢 Status: {stock_text}"
         )
         
-        kb = [
-            [types.InlineKeyboardButton(
-                text=f"Kaufen für {product['price']}€", 
+        kb = []
+        # Kaufen-Button nur anzeigen, wenn Bestand > 0 ist
+        if stock_count > 0:
+            kb.append([types.InlineKeyboardButton(
+                text=f"🛒 Jetzt kaufen ({product['price']}€)", 
                 callback_data=f"buy_{product['id']}_{product['owner_id']}"
-            )]
-        ]
+            )])
+        else:
+            kb.append([types.InlineKeyboardButton(
+                text="Nachricht an Verkäufer", 
+                url=f"tg://user?id={product['owner_id']}"
+            )])
+            
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=kb)
         
         await message.answer(caption, reply_markup=keyboard, parse_mode="Markdown")
@@ -37,6 +50,12 @@ async def start_purchase(callback: types.CallbackQuery):
     product_id = data[1]
     seller_id = int(data[2])
     
+    # Sicherheitshalber den Bestand vor der Bestellung nochmal prüfen
+    stock_count = await get_stock_count(product_id)
+    if stock_count <= 0:
+        await callback.answer("⚠️ Leider ist dieses Produkt gerade ausverkauft!", show_alert=True)
+        return
+
     # Bestellung in der Datenbank anlegen (Status: pending)
     order = await create_order(
         buyer_id=callback.from_user.id,
@@ -46,16 +65,16 @@ async def start_purchase(callback: types.CallbackQuery):
     
     if order:
         await callback.message.answer(
-            "Vielen Dank für dein Interesse!\n\n"
+            "✅ **Bestellung eingeleitet!**\n\n"
             "Bitte sende den Betrag an die vom Händler hinterlegte Adresse.\n"
-            "Sobald der Händler den Zahlungseingang bestätigt, erhältst du deine Ware automatisch hier im Chat."
+            "Sobald der Händler den Zahlungseingang bestätigt, wird dir die Ware (Logins/Codes) **automatisch hier im Chat** zugestellt.",
+            parse_mode="Markdown"
         )
         
-        # Benachrichtigung an den Verkäufer senden
-        # Hier nutzen wir die Bot-Instanz, um dem Verkäufer den Bestätigungs-Button zu schicken
+        # Benachrichtigung an den Verkäufer (Admin) senden
         confirm_kb = [
             [types.InlineKeyboardButton(
-                text="Zahlung erhalten & Ware senden", 
+                text="✅ Zahlung erhalten (Ware senden)", 
                 callback_data=f"confirm_{order['id']}"
             )]
         ]
@@ -63,11 +82,17 @@ async def start_purchase(callback: types.CallbackQuery):
         
         await callback.bot.send_message(
             chat_id=seller_id,
-            text=f"🔔 **Neue Bestellung!**\n\nEin Kunde möchte ein Produkt kaufen. Bitte bestätige den Erhalt der Zahlung, um die Ware freizugeben.",
+            text=(
+                f"🔔 **Neue Bestellung!**\n\n"
+                f"Ein Kunde möchte ein Produkt kaufen.\n"
+                f"Bestell-ID: `{order['id']}`\n"
+                f"Kunde: @{callback.from_user.username or 'Unbekannt'} (`{callback.from_user.id}`)\n\n"
+                f"Bitte bestätige den Zahlungseingang, um das Produkt aus dem Lager freizugeben."
+            ),
             reply_markup=confirm_keyboard,
             parse_mode="Markdown"
         )
         
-        await callback.answer("Bestellung wurde aufgenommen!")
+        await callback.answer("Bestellung aufgenommen!")
     else:
         await callback.answer("Fehler beim Erstellen der Bestellung.", show_alert=True)

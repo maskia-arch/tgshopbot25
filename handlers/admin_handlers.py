@@ -2,15 +2,24 @@ from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from services.db_service import add_product, get_user_products, delete_product, confirm_order
+from services.db_service import (
+    add_product, get_user_products, delete_product, 
+    confirm_order, refill_stock, get_stock_count
+)
 from core.validator import can_add_product
+from core.supabase_client import db # Import für Order-Abfrage hinzugefügt
 
 router = Router()
 
+# States für Produkt-Erstellung und Refill
 class ProductForm(StatesGroup):
     name = State()
     description = State()
     price = State()
+    content = State()
+
+class RefillForm(StatesGroup):
+    product_id = State()
     content = State()
 
 @router.message(F.text == "🛒 Meinen Test-Shop verwalten")
@@ -22,12 +31,13 @@ async def admin_menu(message: types.Message):
         [types.KeyboardButton(text="🏠 Hauptmenü")]
     ]
     keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
-    await message.answer("Willkommen im Admin-Bereich von Own1Shop.", reply_markup=keyboard)
+    await message.answer("🛠 **Admin-Bereich**\nVerwalte deine Produkte und fülle dein Lager auf.", reply_markup=keyboard, parse_mode="Markdown")
 
+# --- PRODUKT HINZUFÜGEN ---
 @router.message(F.text == "➕ Produkt hinzufügen")
 async def start_add_product(message: types.Message, state: FSMContext):
     if not await can_add_product(message.from_user.id):
-        await message.answer("Limit erreicht! Im Free-Modus max. 2 Produkte. Upgrade auf Pro für unbegrenzt.")
+        await message.answer("⚠️ Limit erreicht! Im Free-Modus max. 2 Produkte. Upgrade auf Pro für unbegrenzt.")
         return
     
     await state.set_state(ProductForm.name)
@@ -43,7 +53,7 @@ async def process_name(message: types.Message, state: FSMContext):
 async def process_description(message: types.Message, state: FSMContext):
     await state.update_data(description=message.text)
     await state.set_state(ProductForm.price)
-    await message.answer("Was soll es kosten? (z.B. 5.99)")
+    await message.answer("Was soll es kosten? (z.B. 12.50)")
 
 @router.message(ProductForm.price)
 async def process_price(message: types.Message, state: FSMContext):
@@ -51,7 +61,13 @@ async def process_price(message: types.Message, state: FSMContext):
         price = float(message.text.replace(",", "."))
         await state.update_data(price=price)
         await state.set_state(ProductForm.content)
-        await message.answer("Sende nun die Ware (Logins, Codes, etc.):")
+        await message.answer(
+            "📦 **Lagerbestand einreichen**\n\n"
+            "Bitte sende die Daten im Format:\n"
+            "`email:passwort, email:passwort`\n\n"
+            "Oder ein Eintrag pro Zeile. Der Bot erkennt die Anzahl automatisch.",
+            parse_mode="Markdown"
+        )
     except ValueError:
         await message.answer("Bitte eine gültige Zahl eingeben.")
 
@@ -66,10 +82,90 @@ async def process_content(message: types.Message, state: FSMContext):
         description=data['description']
     )
     await state.clear()
-    await message.answer(f"✅ Produkt '{data['name']}' wurde erfolgreich erstellt!")
+    await message.answer(f"✅ Produkt **{data['name']}** wurde erstellt und Lager befüllt!", parse_mode="Markdown")
+
+# --- PRODUKTE VERWALTEN & REFILL ---
+@router.message(F.text == "📋 Meine Produkte")
+async def list_admin_products(message: types.Message):
+    products = await get_user_products(message.from_user.id)
+    if not products:
+        await message.answer("Du hast noch keine Produkte angelegt.")
+        return
+
+    for p in products:
+        stock = await get_stock_count(p['id'])
+        text = (
+            f"📦 **{p['name']}**\n"
+            f"💰 Preis: {p['price']}€\n"
+            f"🔢 Lagerbestand: `{stock}`"
+        )
+        kb = [
+            [types.InlineKeyboardButton(text="➕ Lager auffüllen", callback_data=f"refill_{p['id']}")],
+            [types.InlineKeyboardButton(text="🗑 Löschen", callback_data=f"delete_{p['id']}")]
+        ]
+        await message.answer(text, reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
+
+@router.callback_query(F.data.startswith("refill_"))
+async def start_refill(callback: types.CallbackQuery, state: FSMContext):
+    product_id = int(callback.data.split("_")[1])
+    await state.update_data(refill_id=product_id)
+    await state.set_state(RefillForm.content)
+    await callback.message.answer("Sende nun die neuen Daten (Format: `mail:pass, mail:pass`):", parse_mode="Markdown")
+    await callback.answer()
+
+@router.message(RefillForm.content)
+async def process_refill_content(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    added_count = await refill_stock(data['refill_id'], message.from_user.id, message.text)
+    
+    await state.clear()
+    await message.answer(f"✅ Erfolgreich `{added_count}` neue Einheiten zum Lager hinzugefügt!", parse_mode="Markdown")
 
 @router.callback_query(F.data.startswith("confirm_"))
 async def process_confirm_sale(callback: types.CallbackQuery):
     order_id = callback.data.split("_")[1]
-    await confirm_order(order_id)
-    await callback.message.edit_text("✅ Verkauf bestätigt. Die Ware wurde an den Kunden gesendet.")
+    
+    # 1. Bestelldetails holen, um Käufer-ID zu ermitteln
+    order_res = db.table("orders").select("*").eq("id", order_id).single().execute()
+    if not order_res.data:
+        await callback.answer("Bestellung nicht gefunden.")
+        return
+    
+    buyer_id = order_res.data['buyer_id']
+    
+    # 2. confirm_order entnimmt das Item aus dem Stock (db_service)
+    item_content = await confirm_order(order_id)
+    
+    if item_content == "sold_out":
+        await callback.message.answer("❌ Fehler: Produkt ist mittlerweile ausverkauft!")
+    elif item_content:
+        # 3. Ware an den KÄUFER senden
+        try:
+            await callback.bot.send_message(
+                chat_id=buyer_id,
+                text=(
+                    f"🎉 **Zahlung bestätigt!**\n\n"
+                    f"Vielen Dank für deinen Einkauf. Hier ist deine Ware:\n\n"
+                    f"<code>{item_content}</code>"
+                ),
+                parse_mode="HTML"
+            )
+            
+            # 4. Bestätigung an den ADMIN (Verkäufer)
+            await callback.message.edit_text(
+                f"✅ **Verkauf erfolgreich!**\n\n"
+                f"Die Ware wurde automatisch an den Kunden gesendet.\n"
+                f"Inhalt: <code>{item_content}</code>",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            await callback.message.answer(f"⚠️ Kunde konnte nicht benachrichtigt werden, aber Ware wurde entnommen: {item_content}")
+    else:
+        await callback.answer("Fehler beim Verarbeiten der Bestellung.")
+
+@router.callback_query(F.data.startswith("delete_"))
+async def process_delete_product(callback: types.CallbackQuery):
+    product_id = callback.data.split("_")[1]
+    await delete_product(product_id, callback.from_user.id)
+    await callback.message.delete()
+    await callback.answer("Produkt gelöscht.")
