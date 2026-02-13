@@ -95,7 +95,13 @@ async def get_stock_count(product_id):
 
 async def delete_product(product_id, owner_id: int):
     query_id = int(product_id) if str(product_id).isdigit() else product_id
-    db.table("products").delete().eq("id", query_id).eq("owner_id", int(owner_id)).execute()
+    try:
+        db.table("orders").delete().eq("product_id", query_id).execute()
+        db.table("products").delete().eq("id", query_id).eq("owner_id", int(owner_id)).execute()
+        return True
+    except Exception as e:
+        print(f"Löschfehler: {e}")
+        return False
 
 async def confirm_order(order_id: str):
     order_res = db.table("orders").select("*").eq("id", order_id).single().execute()
