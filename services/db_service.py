@@ -1,5 +1,6 @@
 import random
 import string
+import uuid
 from core.supabase_client import db
 
 def generate_unique_shop_id(length=6):
@@ -67,12 +68,13 @@ async def add_product(owner_id: int, name: str, price: float, content: str, desc
 
 async def refill_stock(product_id, owner_id: int, new_content: str):
     try:
-        product = db.table("products").select("content").eq("id", product_id).eq("owner_id", int(owner_id)).single().execute()
+        query_id = int(product_id) if str(product_id).isdigit() else product_id
+        product = db.table("products").select("content").eq("id", query_id).eq("owner_id", int(owner_id)).single().execute()
         if product.data:
             old_content = product.data.get("content", "")
             items = [i.strip() for i in new_content.replace(",", "\n").split("\n") if i.strip()]
             updated_content = (old_content + ("\n" if old_content else "") + "\n".join(items)).strip()
-            db.table("products").update({"content": updated_content}).eq("id", product_id).execute()
+            db.table("products").update({"content": updated_content}).eq("id", query_id).execute()
             return len(items)
     except Exception as e:
         print(f"Fehler: {e}")
@@ -80,7 +82,8 @@ async def refill_stock(product_id, owner_id: int, new_content: str):
 
 async def get_stock_count(product_id):
     try:
-        product = db.table("products").select("content").eq("id", product_id).single().execute()
+        query_id = int(product_id) if str(product_id).isdigit() else product_id
+        product = db.table("products").select("content").eq("id", query_id).single().execute()
         if not product.data or not product.data.get("content"):
             return 0
         return len([i for i in product.data["content"].split("\n") if i.strip()])
@@ -88,7 +91,8 @@ async def get_stock_count(product_id):
         return 0
 
 async def delete_product(product_id, owner_id: int):
-    db.table("products").delete().eq("id", product_id).eq("owner_id", int(owner_id)).execute()
+    query_id = int(product_id) if str(product_id).isdigit() else product_id
+    db.table("products").delete().eq("id", query_id).eq("owner_id", int(owner_id)).execute()
 
 async def confirm_order(order_id: str):
     order_res = db.table("orders").select("*").eq("id", order_id).single().execute()
@@ -96,9 +100,10 @@ async def confirm_order(order_id: str):
         return None
     
     order = order_res.data
-    product_id = order["product_id"]
+    p_id = order["product_id"]
+    query_id = int(p_id) if str(p_id).isdigit() else p_id
     
-    product_res = db.table("products").select("content").eq("id", product_id).single().execute()
+    product_res = db.table("products").select("content").eq("id", query_id).single().execute()
     if not product_res.data:
         return None
         
@@ -111,15 +116,16 @@ async def confirm_order(order_id: str):
     item_to_send = items[0]
     remaining_content = "\n".join(items[1:])
     
-    db.table("products").update({"content": remaining_content}).eq("id", product_id).execute()
+    db.table("products").update({"content": remaining_content}).eq("id", query_id).execute()
     db.table("orders").update({"status": "completed"}).eq("id", order_id).execute()
     
     return item_to_send
 
 async def create_order(buyer_id: int, product_id, seller_id: int):
+    query_id = int(product_id) if str(product_id).isdigit() else product_id
     data = {
         "buyer_id": buyer_id,
-        "product_id": product_id,
+        "product_id": query_id,
         "seller_id": int(seller_id),
         "status": "pending"
     }
