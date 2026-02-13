@@ -11,6 +11,7 @@ async def cmd_start(message: types.Message, command: CommandObject):
     args = command.args
 
     if args:
+        # Deep-Link Logik: Verarbeitet t.me/Bot?start=SHOPID
         shop_owner = await get_user_by_shop_id(args)
         if shop_owner:
             owner_name = shop_owner.get("username", "Unbekannt")
@@ -29,6 +30,7 @@ async def cmd_start(message: types.Message, command: CommandObject):
         else:
             await message.answer("❌ Dieser Shop-Code ist leider ungültig oder existiert nicht mehr.")
 
+    # Normaler Start: Nutzer registrieren oder Profil laden
     await create_new_user(
         telegram_id=message.from_user.id,
         username=message.from_user.username or "User"
@@ -75,5 +77,5 @@ async def view_own_shop(message: types.Message):
 
 @router.message(F.text == "🏠 Hauptmenü")
 async def main_menu(message: types.Message):
-    from aiogram.filters import CommandObject
+    # Ruft cmd_start ohne Argumente auf, um das Dashboard anzuzeigen
     await cmd_start(message, CommandObject(args=None))
