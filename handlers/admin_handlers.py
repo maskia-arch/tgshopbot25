@@ -22,11 +22,15 @@ class RefillForm(StatesGroup):
     product_id = State()
     content = State()
 
-@router.message(Command("start"), F.data.cast(bool) == False)
+@router.message(Command("start"))
 async def cmd_start_handler(message: types.Message, is_owner: bool = False, shop_owner_id: int = None):
     if is_owner:
-        await admin_menu(message)
-    elif not shop_owner_id:
+        await admin_menu(message, is_owner=True)
+    elif shop_owner_id:
+        from bots.shop_logic import show_products_for_shop
+        await message.answer(f"🏪 **Willkommen im Shop!**\nHier sind die aktuellen Angebote:")
+        await show_products_for_shop(message, shop_owner_id)
+    else:
         await message.answer(Messages.WELCOME_BACK.format(status="FREE", shop_id="Keine"))
 
 @router.message(F.text == Buttons.ADMIN_MANAGE)
@@ -39,10 +43,9 @@ async def admin_menu(message: types.Message, is_owner: bool = False):
     shop_id = user.get("shop_id", "Wird generiert...")
     bot_info = await message.bot.get_me()
     
-    if bot_info.token == "DEIN_MASTER_BOT_TOKEN":
-        shop_link = f"https://t.me/{bot_info.username}?start={shop_id}"
-    else:
-        shop_link = f"https://t.me/{bot_info.username}"
+    shop_link = f"https://t.me/{bot_info.username}"
+    if "?start=" not in shop_link and "Own1Shop_Bot" in bot_info.username:
+        shop_link += f"?start={shop_id}"
 
     kb = [
         [types.KeyboardButton(text=Buttons.ADD_PRODUCT)],
