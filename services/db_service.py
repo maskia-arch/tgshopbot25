@@ -16,12 +16,23 @@ async def get_active_pro_users():
     return response.data
 
 async def get_user_by_id(telegram_id: int):
-    """Sucht einen User anhand seiner Telegram-ID."""
+    """
+    Sucht einen User anhand seiner Telegram-ID.
+    Generiert automatisch eine Shop-ID nach, falls diese fehlt.
+    """
     response = db.table("profiles").select("*").eq("id", telegram_id).execute()
-    return response.data[0] if response.data else None
+    if response.data:
+        user = response.data[0]
+        # Falls Altnutzer noch keine Shop-ID haben, hier nachgenerieren
+        if not user.get("shop_id"):
+            new_id = generate_unique_shop_id()
+            db.table("profiles").update({"shop_id": new_id}).eq("id", telegram_id).execute()
+            user["shop_id"] = new_id
+        return user
+    return None
 
 async def get_user_by_shop_id(shop_id: str):
-    """Sucht den Besitzer eines Shops anhand der Shop-ID (z.B. für /start 5ULG63)."""
+    """Sucht den Besitzer eines Shops anhand der Shop-ID."""
     response = db.table("profiles").select("*").eq("shop_id", shop_id.upper()).execute()
     return response.data[0] if response.data else None
 
@@ -48,7 +59,6 @@ async def update_user_token(telegram_id: int, token: str):
 
 async def get_user_products(owner_id: int):
     """Listet alle Produkte eines Besitzers auf."""
-    # Um sicherzugehen, dass IDs korrekt als Integer behandelt werden
     response = db.table("products").select("*").eq("owner_id", int(owner_id)).execute()
     return response.data
 
@@ -70,7 +80,7 @@ async def add_product(owner_id: int, name: str, price: float, content: str, desc
 
 async def refill_stock(product_id: int, owner_id: int, new_content: str):
     """Fügt neuen Lagerbestand hinzu. Wichtig für den 'Lager auffüllen' Button."""
-    product = db.table("products").select("content").eq("id", product_id).eq("owner_id", int(owner_id)).single().execute()
+    product = db.table("products").select("content").eq("id", int(product_id)).eq("owner_id", int(owner_id)).single().execute()
     if product.data:
         old_content = product.data.get("content", "")
         new_items = [i.strip() for i in new_content.replace(",", "\n").split("\n") if i.strip()]
@@ -78,20 +88,19 @@ async def refill_stock(product_id: int, owner_id: int, new_content: str):
         updated_content = old_content + ("\n" if old_content else "") + "\n".join(new_items)
         updated_content = updated_content.strip()
         
-        db.table("products").update({"content": updated_content}).eq("id", product_id).execute()
+        db.table("products").update({"content": updated_content}).eq("id", int(product_id)).execute()
         return len(new_items)
     return 0
 
 async def get_stock_count(product_id: int):
     """Gibt die Anzahl der verfügbaren Items zurück."""
-    product = db.table("products").select("content").eq("id", product_id).single().execute()
+    product = db.table("products").select("content").eq("id", int(product_id)).single().execute()
     if not product.data or not product.data.get("content"):
         return 0
     return len([i for i in product.data["content"].split("\n") if i.strip()])
 
 async def delete_product(product_id: int, owner_id: int):
-    """Löscht ein Produkt permanent. Wichtig für den 'Löschen' Button."""
-    # Wir casten product_id zu int, um Typen-Fehler in der DB zu vermeiden
+    """Löscht ein Produkt permanent. Nutzt explizites Casting für Supabase."""
     db.table("products").delete().eq("id", int(product_id)).eq("owner_id", int(owner_id)).execute()
 
 # --- BESTELLMANAGEMENT ---
@@ -105,7 +114,7 @@ async def confirm_order(order_id: str):
     order = order_res.data
     product_id = order["product_id"]
     
-    product_res = db.table("products").select("content").eq("id", product_id).single().execute()
+    product_res = db.table("products").select("content").eq("id", int(product_id)).single().execute()
     if not product_res.data:
         return None
         
@@ -118,7 +127,7 @@ async def confirm_order(order_id: str):
     item_to_send = items[0]
     remaining_content = "\n".join(items[1:])
     
-    db.table("products").update({"content": remaining_content}).eq("id", product_id).execute()
+    db.table("products").update({"content": remaining_content}).eq("id", int(product_id)).execute()
     db.table("orders").update({"status": "completed"}).eq("id", order_id).execute()
     
     return item_to_send

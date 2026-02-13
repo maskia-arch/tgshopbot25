@@ -25,11 +25,12 @@ class RefillForm(StatesGroup):
 @router.message(F.text == "🛒 Meinen Test-Shop verwalten")
 @router.message(Command("admin"))
 async def admin_menu(message: types.Message):
+    # User-Daten abrufen (DB-Service generiert ID nach, falls sie fehlt)
     user = await get_user_by_id(message.from_user.id)
-    shop_id = user.get("shop_id", "Nicht generiert")
+    shop_id = user.get("shop_id", "Wird generiert...")
     bot_info = await message.bot.get_me()
     
-    # Der eindeutige Link für Kunden
+    # Der eindeutige Link für Kunden via Deep-Linking
     shop_link = f"https://t.me/{bot_info.username}?start={shop_id}"
 
     kb = [
@@ -43,7 +44,7 @@ async def admin_menu(message: types.Message):
         "🛠 **Admin-Bereich**\n\n"
         f"🆔 Deine Shop-ID: `{shop_id}`\n"
         f"🔗 Kunden-Link: [Hier klicken]({shop_link})\n\n"
-        "Verwalte hier deine Produkte und Bestände."
+        "Verwalte hier deine Produkte, Bestände und Verkäufe."
     )
     
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
@@ -93,9 +94,8 @@ async def process_price(message: types.Message, state: FSMContext):
 @router.callback_query(F.data == "skip_stock")
 async def skip_stock_process(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    # Sicherstellen, dass wir im richtigen State sind oder Daten existieren
     if not data.get("name"):
-        await callback.answer("Fehler: Keine Daten gefunden.")
+        await callback.answer("Fehler: Sitzung abgelaufen.", show_alert=True)
         return
 
     await add_product(
@@ -112,7 +112,9 @@ async def skip_stock_process(callback: types.CallbackQuery, state: FSMContext):
 @router.message(ProductForm.content)
 async def process_content(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    if not data.get("name"): return
+    if not data.get("name"): 
+        await state.clear()
+        return
 
     await add_product(
         owner_id=message.from_user.id,
@@ -124,7 +126,7 @@ async def process_content(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(f"✅ Produkt **{data['name']}** wurde erstellt!")
 
-# --- PRODUKTE VERWALTEN ---
+# --- PRODUKTE VERWALTEN (BUTTON-FIXES) ---
 @router.message(F.text == "📋 Meine Produkte")
 async def list_admin_products(message: types.Message):
     products = await get_user_products(message.from_user.id)
@@ -147,12 +149,14 @@ async def list_admin_products(message: types.Message):
 
 @router.callback_query(F.data.startswith("refill_"))
 async def start_refill(callback: types.CallbackQuery, state: FSMContext):
-    # ID sicher extrahieren
-    product_id = int(callback.data.split("_")[1])
-    await state.update_data(refill_id=product_id)
-    await state.set_state(RefillForm.content)
-    await callback.message.answer("📥 Sende nun die neuen Daten (`mail:pass, mail:pass`):")
-    await callback.answer()
+    try:
+        product_id = int(callback.data.split("_")[1])
+        await state.update_data(refill_id=product_id)
+        await state.set_state(RefillForm.content)
+        await callback.message.answer("📥 Sende nun die neuen Daten (`mail:pass` oder eine pro Zeile):")
+        await callback.answer()
+    except (ValueError, IndexError):
+        await callback.answer("Fehler beim Identifizieren des Produkts.", show_alert=True)
 
 @router.message(RefillForm.content)
 async def process_refill_content(message: types.Message, state: FSMContext):
@@ -167,29 +171,44 @@ async def process_refill_content(message: types.Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("delete_"))
 async def process_delete_product(callback: types.CallbackQuery):
-    product_id = int(callback.data.split("_")[1])
-    await delete_product(product_id, callback.from_user.id)
-    await callback.message.delete()
-    await callback.answer("Produkt gelöscht.")
+    try:
+        product_id = int(callback.data.split("_")[1])
+        await delete_product(product_id, callback.from_user.id)
+        await callback.message.delete()
+        await callback.answer("✅ Produkt gelöscht.")
+    except (ValueError, IndexError):
+        await callback.answer("Fehler beim Löschen des Produkts.", show_alert=True)
 
 @router.callback_query(F.data.startswith("confirm_"))
 async def process_confirm_sale(callback: types.CallbackQuery):
-    order_id = callback.data.split("_")[1]
-    order_res = db.table("orders").select("*").eq("id", order_id).single().execute()
-    
-    if not order_res.data:
-        await callback.answer("Bestellung nicht gefunden.")
-        return
-    
-    buyer_id = order_res.data['buyer_id']
-    item_content = await confirm_order(order_id)
-    
-    if item_content == "sold_out":
-        await callback.message.answer("❌ Produkt ist ausverkauft!")
-    elif item_content:
-        try:
-            await callback.bot.send_message(buyer_id, f"🎉 Zahlung bestätigt! Deine Ware:\n\n<code>{item_content}</code>", parse_mode="HTML")
-            await callback.message.edit_text(f"✅ Ware automatisch gesendet:\n<code>{item_content}</code>", parse_mode="HTML")
-        except Exception:
-            await callback.message.answer(f"⚠️ Kunde blockiert Bot. Ware: {item_content}")
-    await callback.answer()
+    try:
+        order_id = callback.data.split("_")[1]
+        order_res = db.table("orders").select("*").eq("id", order_id).single().execute()
+        
+        if not order_res.data:
+            await callback.answer("Bestellung nicht gefunden.")
+            return
+        
+        buyer_id = order_res.data['buyer_id']
+        item_content = await confirm_order(order_id)
+        
+        if item_content == "sold_out":
+            await callback.message.answer("❌ Produkt ist ausverkauft!")
+        elif item_content:
+            try:
+                # Ware an den Kunden senden
+                await callback.bot.send_message(
+                    buyer_id, 
+                    f"🎉 **Zahlung bestätigt!**\n\nHier ist deine Ware:\n<code>{item_content}</code>", 
+                    parse_mode="HTML"
+                )
+                # Admin-Nachricht aktualisieren
+                await callback.message.edit_text(
+                    f"✅ **Verkauf bestätigt!**\nDie Ware wurde automatisch gesendet:\n<code>{item_content}</code>", 
+                    parse_mode="HTML"
+                )
+            except Exception:
+                await callback.message.answer(f"⚠️ Kunde konnte nicht benachrichtigt werden. Ware: {item_content}")
+        await callback.answer()
+    except Exception as e:
+        await callback.answer(f"Fehler: {str(e)}", show_alert=True)
