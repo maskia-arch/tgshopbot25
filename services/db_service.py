@@ -59,8 +59,13 @@ async def update_user_token(telegram_id: int, token: str):
 
 async def get_user_products(owner_id: int):
     """Listet alle Produkte eines Besitzers auf."""
-    response = db.table("products").select("*").eq("owner_id", int(owner_id)).execute()
-    return response.data
+    try:
+        # Explizites Casting zu int, um PGRST204 Fehler zu vermeiden
+        response = db.table("products").select("*").eq("owner_id", int(owner_id)).execute()
+        return response.data
+    except Exception as e:
+        print(f"Fehler beim Laden der Produkte: {e}")
+        return []
 
 async def add_product(owner_id: int, name: str, price: float, content: str, description: str = ""):
     """Erstellt ein Produkt mit optionalem Lagerbestand."""
@@ -80,24 +85,30 @@ async def add_product(owner_id: int, name: str, price: float, content: str, desc
 
 async def refill_stock(product_id: int, owner_id: int, new_content: str):
     """Fügt neuen Lagerbestand hinzu. Wichtig für den 'Lager auffüllen' Button."""
-    product = db.table("products").select("content").eq("id", int(product_id)).eq("owner_id", int(owner_id)).single().execute()
-    if product.data:
-        old_content = product.data.get("content", "")
-        new_items = [i.strip() for i in new_content.replace(",", "\n").split("\n") if i.strip()]
-        
-        updated_content = old_content + ("\n" if old_content else "") + "\n".join(new_items)
-        updated_content = updated_content.strip()
-        
-        db.table("products").update({"content": updated_content}).eq("id", int(product_id)).execute()
-        return len(new_items)
+    try:
+        product = db.table("products").select("content").eq("id", int(product_id)).eq("owner_id", int(owner_id)).single().execute()
+        if product.data:
+            old_content = product.data.get("content", "")
+            new_items = [i.strip() for i in new_content.replace(",", "\n").split("\n") if i.strip()]
+            
+            updated_content = old_content + ("\n" if old_content else "") + "\n".join(new_items)
+            updated_content = updated_content.strip()
+            
+            db.table("products").update({"content": updated_content}).eq("id", int(product_id)).execute()
+            return len(new_items)
+    except Exception as e:
+        print(f"Fehler beim Lager auffüllen: {e}")
     return 0
 
 async def get_stock_count(product_id: int):
     """Gibt die Anzahl der verfügbaren Items zurück."""
-    product = db.table("products").select("content").eq("id", int(product_id)).single().execute()
-    if not product.data or not product.data.get("content"):
+    try:
+        product = db.table("products").select("content").eq("id", int(product_id)).single().execute()
+        if not product.data or not product.data.get("content"):
+            return 0
+        return len([i for i in product.data["content"].split("\n") if i.strip()])
+    except:
         return 0
-    return len([i for i in product.data["content"].split("\n") if i.strip()])
 
 async def delete_product(product_id: int, owner_id: int):
     """Löscht ein Produkt permanent. Nutzt explizites Casting für Supabase."""

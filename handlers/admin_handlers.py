@@ -25,12 +25,12 @@ class RefillForm(StatesGroup):
 @router.message(F.text == "🛒 Meinen Test-Shop verwalten")
 @router.message(Command("admin"))
 async def admin_menu(message: types.Message):
-    # User-Daten abrufen (DB-Service generiert ID nach, falls sie fehlt)
+    """Zeigt das Admin-Panel mit der persönlichen Shop-ID und dem Kunden-Link."""
     user = await get_user_by_id(message.from_user.id)
+    # Shop-ID wird im db_service automatisch nachgeneriert, falls sie fehlt
     shop_id = user.get("shop_id", "Wird generiert...")
     bot_info = await message.bot.get_me()
     
-    # Der eindeutige Link für Kunden via Deep-Linking
     shop_link = f"https://t.me/{bot_info.username}?start={shop_id}"
 
     kb = [
@@ -126,24 +126,27 @@ async def process_content(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(f"✅ Produkt **{data['name']}** wurde erstellt!")
 
-# --- PRODUKTE VERWALTEN (BUTTON-FIXES) ---
+# --- PRODUKTE VERWALTEN ---
 @router.message(F.text == "📋 Meine Produkte")
 async def list_admin_products(message: types.Message):
+    """Ruft die Produkte ab und zeigt sie mit funktionierenden Inline-Buttons an."""
     products = await get_user_products(message.from_user.id)
     if not products:
         await message.answer("Du hast noch keine Produkte angelegt.")
         return
 
     for p in products:
-        stock = await get_stock_count(p['id'])
+        p_id = p['id']
+        stock = await get_stock_count(p_id)
         text = (
             f"📦 **{p['name']}**\n"
             f"💰 Preis: {p['price']}€\n"
             f"🔢 Lagerbestand: `{stock}`"
         )
+        # IDs werden hier als String im Callback übergeben, im Handler zu int konvertiert
         kb = [
-            [types.InlineKeyboardButton(text="➕ Lager auffüllen", callback_data=f"refill_{p['id']}")],
-            [types.InlineKeyboardButton(text="🗑 Löschen", callback_data=f"delete_{p['id']}")]
+            [types.InlineKeyboardButton(text="➕ Lager auffüllen", callback_data=f"refill_{p_id}")],
+            [types.InlineKeyboardButton(text="🗑 Löschen", callback_data=f"delete_{p_id}")]
         ]
         await message.answer(text, reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
 
@@ -181,6 +184,7 @@ async def process_delete_product(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("confirm_"))
 async def process_confirm_sale(callback: types.CallbackQuery):
+    """Handler für die Verkaufsbestätigung (Zahlungserhalt)."""
     try:
         order_id = callback.data.split("_")[1]
         order_res = db.table("orders").select("*").eq("id", order_id).single().execute()
@@ -196,13 +200,11 @@ async def process_confirm_sale(callback: types.CallbackQuery):
             await callback.message.answer("❌ Produkt ist ausverkauft!")
         elif item_content:
             try:
-                # Ware an den Kunden senden
                 await callback.bot.send_message(
                     buyer_id, 
                     f"🎉 **Zahlung bestätigt!**\n\nHier ist deine Ware:\n<code>{item_content}</code>", 
                     parse_mode="HTML"
                 )
-                # Admin-Nachricht aktualisieren
                 await callback.message.edit_text(
                     f"✅ **Verkauf bestätigt!**\nDie Ware wurde automatisch gesendet:\n<code>{item_content}</code>", 
                     parse_mode="HTML"
