@@ -26,6 +26,10 @@ async def get_user_by_shop_id(shop_id: str):
     response = db.table("profiles").select("*").eq("shop_id", shop_id.upper()).execute()
     return response.data[0] if response.data else None
 
+async def get_shop_by_token(token: str):
+    response = db.table("profiles").select("*").eq("custom_bot_token", token).execute()
+    return response.data[0] if response.data else None
+
 async def create_new_user(telegram_id: int, username: str):
     user = await get_user_by_id(telegram_id)
     if not user:

@@ -1,14 +1,12 @@
 from aiogram import Router, types, F
+from aiogram.filters import Command
 from services.db_service import get_user_products, get_stock_count
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from core.strings import Buttons
 
 router = Router()
 
 async def show_products_for_shop(message: types.Message, owner_id: int):
-    """
-    Kern-Funktion, um alle Produkte eines spezifischen Shops anzuzeigen.
-    Wird vom Master-Bot aufgerufen, wenn ein Deep-Link benutzt wird.
-    """
     products = await get_user_products(owner_id)
     
     if not products:
@@ -22,7 +20,6 @@ async def show_products_for_shop(message: types.Message, owner_id: int):
     for product in products:
         stock_count = await get_stock_count(product['id'])
         
-        # Status-Anzeige für den Kunden
         if stock_count > 0:
             stock_status = f"✅ Vorrätig: `{stock_count}`"
         else:
@@ -35,16 +32,13 @@ async def show_products_for_shop(message: types.Message, owner_id: int):
             f"🔢 Status: {stock_status}"
         )
 
-        # Inline Keyboard für den Kaufprozess
         builder = InlineKeyboardBuilder()
         if stock_count > 0:
-            # Wir übergeben Produkt-ID und Verkäufer-ID im Callback
             builder.row(types.InlineKeyboardButton(
                 text=f"🛒 Kaufen ({product['price']}€)",
                 callback_data=f"buy_{product['id']}_{owner_id}"
             ))
         else:
-            # Optional: Kontakt zum Verkäufer, wenn ausverkauft
             builder.row(types.InlineKeyboardButton(
                 text="📧 Verkäufer kontaktieren",
                 url=f"tg://user?id={owner_id}"
@@ -56,8 +50,15 @@ async def show_products_for_shop(message: types.Message, owner_id: int):
             parse_mode="Markdown"
         )
 
+@router.message(Command("start"))
+async def handle_shop_start(message: types.Message, is_owner: bool = False, shop_owner_id: int = None):
+    if is_owner:
+        return
+
+    if shop_owner_id:
+        await message.answer(f"🏪 **Willkommen im Shop!**\nHier sind die aktuellen Angebote:")
+        await show_products_for_shop(message, shop_owner_id)
+
 @router.callback_query(F.data == "refresh_shop")
 async def refresh_shop_view(callback: types.CallbackQuery):
-    """Ermöglicht es dem Kunden, die Ansicht zu aktualisieren."""
-    # Logik zur Aktualisierung (optional)
     await callback.answer("Ansicht wurde aktualisiert.")

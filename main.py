@@ -18,6 +18,7 @@ from handlers import (
     master_admin_router
 )
 from services.db_service import get_active_pro_users
+from core.middlewares import ShopMiddleware
 
 app = Flask(__name__)
 
@@ -46,6 +47,7 @@ async def start_customer_bots(main_dispatcher: Dispatcher):
                     token=token,
                     default=DefaultBotProperties(parse_mode="HTML")
                 )
+                await customer_bot.delete_webhook(drop_pending_updates=True)
                 asyncio.create_task(main_dispatcher.start_polling(customer_bot))
                 logger.info(f"✅ Externer Shop-Bot für User {shop['id']} gestartet.")
             except Exception as e:
@@ -64,6 +66,9 @@ async def main():
     )
     
     dp = Dispatcher(storage=storage)
+
+    dp.message.middleware(ShopMiddleware())
+    dp.callback_query.middleware(ShopMiddleware())
 
     dp.include_router(master_admin_router)
     dp.include_router(admin_router)
