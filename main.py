@@ -1,57 +1,56 @@
 import asyncio
 import logging
+import os
+import threading
+from flask import Flask
 from aiogram import Bot, Dispatcher
 from config import Config
 from bots.master_bot import router as master_router
 from bots.shop_logic import router as shop_router
-from services.db_service import get_active_pro_users
+from handlers import admin_router, customer_router, payment_router
 
-# Logging für Render.com Logs konfigurieren
+# 1. Webserver für Render (Health Check)
+app = Flask(__name__)
+
+@app.route('/')
+def health():
+    return "Bot is running", 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+# 2. Logging Setup
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-async def start_customer_bots(dp: Dispatcher):
-    """Lädt alle aktiven Pro-Bots aus Supabase und startet sie."""
-    active_shops = await get_active_pro_users()
-    
-    for shop in active_shops:
-        token = shop.get("custom_bot_token")
-        if token:
-            try:
-                customer_bot = Bot(token=token)
-                # Wir nutzen denselben Router für alle Kunden-Bots
-                # Die Unterscheidung erfolgt im Handler über die bot_id
-                logger.info(f"Starte Kunden-Bot für User {shop['id']}...")
-                # Hinweis: Bei vielen Bots empfiehlt sich hier ein Bot-Manager/Polling-Task
-            except Exception as e:
-                logger.error(f"Fehler beim Starten von Bot {token[:10]}...: {e}")
-
 async def main():
-    # 1. Master-Bot initialisieren
     if not Config.MASTER_BOT_TOKEN:
         logger.error("MASTER_BOT_TOKEN nicht gefunden! Abbruch.")
         return
 
-    master_bot = Bot(token=Config.MASTER_BOT_TOKEN)
+    bot = Bot(token=Config.MASTER_BOT_TOKEN)
     dp = Dispatcher()
 
-    # 2. Router registrieren
-    dp.include_router(master_router) # Logik für deinen Own1Shop Bot
-    dp.include_router(shop_router)   # Logik für die Shops der User
+    # Router registrieren
+    dp.include_router(master_router)
+    dp.include_router(shop_router)
+    dp.include_router(admin_router)
+    dp.include_router(customer_router)
+    dp.include_router(payment_router)
 
     logger.info(f"Own1Shop Version {Config.VERSION} wird gestartet...")
-
-    # 3. Optionale Pro-Bots laden (für die Zukunft/Skalierung)
-    # await start_customer_bots(dp)
-
-    # 4. Polling starten
-    # Der Master-Bot hört auf Nachrichten
-    await dp.start_polling(master_bot)
+    
+    # Startet das Polling
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
+    # Flask-Server in einem separaten Thread starten
+    threading.Thread(target=run_flask, daemon=True).start()
+    
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
