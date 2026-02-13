@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from services.db_service import (
     add_product, get_user_products, delete_product, 
-    confirm_order, refill_stock, get_stock_count
+    confirm_order, refill_stock, get_stock_count, get_user_by_id
 )
 from core.validator import can_add_product
 from core.supabase_client import db
@@ -25,15 +25,30 @@ class RefillForm(StatesGroup):
 @router.message(F.text == "🛒 Meinen Test-Shop verwalten")
 @router.message(Command("admin"))
 async def admin_menu(message: types.Message):
+    user = await get_user_by_id(message.from_user.id)
+    shop_id = user.get("shop_id", "Nicht generiert")
+    bot_info = await message.bot.get_me()
+    
+    # Der eindeutige Link für Kunden
+    shop_link = f"https://t.me/{bot_info.username}?start={shop_id}"
+
     kb = [
         [types.KeyboardButton(text="➕ Produkt hinzufügen")],
         [types.KeyboardButton(text="📋 Meine Produkte")],
         [types.KeyboardButton(text="🏠 Hauptmenü")]
     ]
     keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
-    await message.answer("🛠 **Admin-Bereich**\nVerwalte hier deine Produkte für deinen Shop-Bot.", reply_markup=keyboard, parse_mode="Markdown")
+    
+    text = (
+        "🛠 **Admin-Bereich**\n\n"
+        f"🆔 Deine Shop-ID: `{shop_id}`\n"
+        f"🔗 Kunden-Link: [Hier klicken]({shop_link})\n\n"
+        "Verwalte hier deine Produkte und Bestände."
+    )
+    
+    await message.answer(text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
 
-# --- PRODUKT HINZUFÜGEN (JETZT OPTIONAL) ---
+# --- PRODUKT HINZUFÜGEN ---
 @router.message(F.text == "➕ Produkt hinzufügen")
 async def start_add_product(message: types.Message, state: FSMContext):
     if not await can_add_product(message.from_user.id):
@@ -62,29 +77,32 @@ async def process_price(message: types.Message, state: FSMContext):
         await state.update_data(price=price)
         await state.set_state(ProductForm.content)
         
-        # Inline Button zum Überspringen
-        kb = [[types.InlineKeyboardButton(text="⏭ Später auffüllen", callback_data="skip_stock")]]
+        kb = [[types.InlineKeyboardButton(text="⏭ Später auffüllen (Überspringen)", callback_data="skip_stock")]]
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=kb)
         
         await message.answer(
             "📦 **Lagerbestand hinzufügen (Optional)**\n\n"
             "Sende jetzt die Daten (Format: `mail:pass, mail:pass`)\n"
-            "oder klicke auf 'Später auffüllen'.",
+            "oder überspringe diesen Schritt.",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
     except ValueError:
         await message.answer("Bitte eine gültige Zahl eingeben.")
 
-# Handler für das Überspringen
-@router.callback_query(F.data == "skip_stock", ProductForm.content)
+@router.callback_query(F.data == "skip_stock")
 async def skip_stock_process(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
+    # Sicherstellen, dass wir im richtigen State sind oder Daten existieren
+    if not data.get("name"):
+        await callback.answer("Fehler: Keine Daten gefunden.")
+        return
+
     await add_product(
         owner_id=callback.from_user.id,
         name=data['name'],
         price=data['price'],
-        content="", # Leer lassen
+        content="", 
         description=data['description']
     )
     await state.clear()
@@ -94,6 +112,8 @@ async def skip_stock_process(callback: types.CallbackQuery, state: FSMContext):
 @router.message(ProductForm.content)
 async def process_content(message: types.Message, state: FSMContext):
     data = await state.get_data()
+    if not data.get("name"): return
+
     await add_product(
         owner_id=message.from_user.id,
         name=data['name'],
@@ -102,9 +122,9 @@ async def process_content(message: types.Message, state: FSMContext):
         description=data['description']
     )
     await state.clear()
-    await message.answer(f"✅ Produkt **{data['name']}** wurde erstellt und Lager befüllt!", parse_mode="Markdown")
+    await message.answer(f"✅ Produkt **{data['name']}** wurde erstellt!")
 
-# --- PRODUKTE VERWALTEN (FIXED BUTTONS) ---
+# --- PRODUKTE VERWALTEN ---
 @router.message(F.text == "📋 Meine Produkte")
 async def list_admin_products(message: types.Message):
     products = await get_user_products(message.from_user.id)
@@ -127,6 +147,7 @@ async def list_admin_products(message: types.Message):
 
 @router.callback_query(F.data.startswith("refill_"))
 async def start_refill(callback: types.CallbackQuery, state: FSMContext):
+    # ID sicher extrahieren
     product_id = int(callback.data.split("_")[1])
     await state.update_data(refill_id=product_id)
     await state.set_state(RefillForm.content)
@@ -136,10 +157,20 @@ async def start_refill(callback: types.CallbackQuery, state: FSMContext):
 @router.message(RefillForm.content)
 async def process_refill_content(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    added_count = await refill_stock(data['refill_id'], message.from_user.id, message.text)
+    pid = data.get('refill_id')
+    
+    if pid:
+        added_count = await refill_stock(pid, message.from_user.id, message.text)
+        await message.answer(f"✅ Erfolgreich `{added_count}` Einheiten nachgefüllt!")
     
     await state.clear()
-    await message.answer(f"✅ Erfolgreich `{added_count}` Einheiten nachgefüllt!")
+
+@router.callback_query(F.data.startswith("delete_"))
+async def process_delete_product(callback: types.CallbackQuery):
+    product_id = int(callback.data.split("_")[1])
+    await delete_product(product_id, callback.from_user.id)
+    await callback.message.delete()
+    await callback.answer("Produkt gelöscht.")
 
 @router.callback_query(F.data.startswith("confirm_"))
 async def process_confirm_sale(callback: types.CallbackQuery):
@@ -162,10 +193,3 @@ async def process_confirm_sale(callback: types.CallbackQuery):
         except Exception:
             await callback.message.answer(f"⚠️ Kunde blockiert Bot. Ware: {item_content}")
     await callback.answer()
-
-@router.callback_query(F.data.startswith("delete_"))
-async def process_delete_product(callback: types.CallbackQuery):
-    product_id = int(callback.data.split("_")[1])
-    await delete_product(product_id, callback.from_user.id)
-    await callback.message.delete()
-    await callback.answer("Produkt gelöscht.")

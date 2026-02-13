@@ -1,4 +1,14 @@
+import random
+import string
 from core.supabase_client import db
+
+# --- HILFSFUNKTION FÜR SHOP-ID ---
+def generate_unique_shop_id(length=6):
+    """Generiert einen zufälligen Code wie 5ULG63."""
+    characters = string.ascii_uppercase + string.digits
+    return ''.join(random.choice(characters) for _ in range(length))
+
+# --- USER & SHOP MANAGEMENT ---
 
 async def get_active_pro_users():
     """Holt alle User, die ein aktives PRO-Abo haben."""
@@ -10,14 +20,21 @@ async def get_user_by_id(telegram_id: int):
     response = db.table("profiles").select("*").eq("id", telegram_id).execute()
     return response.data[0] if response.data else None
 
+async def get_user_by_shop_id(shop_id: str):
+    """Sucht den Besitzer eines Shops anhand der Shop-ID (z.B. für /start 5ULG63)."""
+    response = db.table("profiles").select("*").eq("shop_id", shop_id.upper()).execute()
+    return response.data[0] if response.data else None
+
 async def create_new_user(telegram_id: int, username: str):
-    """Erstellt ein neues Profil, falls es noch nicht existiert."""
+    """Erstellt ein neues Profil inklusive eindeutiger Shop-ID."""
     user = await get_user_by_id(telegram_id)
     if not user:
+        shop_id = generate_unique_shop_id()
         data = {
             "id": telegram_id,
             "username": username,
-            "is_pro": False
+            "is_pro": False,
+            "shop_id": shop_id
         }
         db.table("profiles").insert(data).execute()
         return True
@@ -27,21 +44,23 @@ async def update_user_token(telegram_id: int, token: str):
     """Speichert den individuellen Bot-Token eines PRO-Users."""
     db.table("profiles").update({"custom_bot_token": token}).eq("id", telegram_id).execute()
 
+# --- PRODUKT MANAGEMENT ---
+
 async def get_user_products(owner_id: int):
-    """Listet alle Produkte eines bestimmten Besitzers auf."""
-    response = db.table("products").select("*").eq("owner_id", owner_id).execute()
+    """Listet alle Produkte eines Besitzers auf."""
+    # Um sicherzugehen, dass IDs korrekt als Integer behandelt werden
+    response = db.table("products").select("*").eq("owner_id", int(owner_id)).execute()
     return response.data
 
 async def add_product(owner_id: int, name: str, price: float, content: str, description: str = ""):
-    """Erstellt ein Produkt. Content (Lagerbestand) ist nun optional."""
+    """Erstellt ein Produkt mit optionalem Lagerbestand."""
     clean_content = ""
     if content:
-        # Bereinigt den Content: Entfernt Leerzeichen und teilt bei Komma oder Zeilenumbruch
         items = [i.strip() for i in content.replace(",", "\n").split("\n") if i.strip()]
         clean_content = "\n".join(items)
     
     data = {
-        "owner_id": owner_id,
+        "owner_id": int(owner_id),
         "name": name,
         "price": price,
         "content": clean_content,
@@ -50,13 +69,12 @@ async def add_product(owner_id: int, name: str, price: float, content: str, desc
     db.table("products").insert(data).execute()
 
 async def refill_stock(product_id: int, owner_id: int, new_content: str):
-    """Fügt neuen Lagerbestand zu einem bestehenden Produkt hinzu."""
-    product = db.table("products").select("content").eq("id", product_id).eq("owner_id", owner_id).single().execute()
+    """Fügt neuen Lagerbestand hinzu. Wichtig für den 'Lager auffüllen' Button."""
+    product = db.table("products").select("content").eq("id", product_id).eq("owner_id", int(owner_id)).single().execute()
     if product.data:
         old_content = product.data.get("content", "")
         new_items = [i.strip() for i in new_content.replace(",", "\n").split("\n") if i.strip()]
         
-        # Bestehenden Inhalt und neuen Inhalt zusammenführen
         updated_content = old_content + ("\n" if old_content else "") + "\n".join(new_items)
         updated_content = updated_content.strip()
         
@@ -65,16 +83,21 @@ async def refill_stock(product_id: int, owner_id: int, new_content: str):
     return 0
 
 async def get_stock_count(product_id: int):
-    """Gibt die Anzahl der aktuell verfügbaren Items zurück."""
+    """Gibt die Anzahl der verfügbaren Items zurück."""
     product = db.table("products").select("content").eq("id", product_id).single().execute()
     if not product.data or not product.data.get("content"):
         return 0
-    # Filtert leere Zeilen, um die korrekte Anzahl zu erhalten
     return len([i for i in product.data["content"].split("\n") if i.strip()])
 
+async def delete_product(product_id: int, owner_id: int):
+    """Löscht ein Produkt permanent. Wichtig für den 'Löschen' Button."""
+    # Wir casten product_id zu int, um Typen-Fehler in der DB zu vermeiden
+    db.table("products").delete().eq("id", int(product_id)).eq("owner_id", int(owner_id)).execute()
+
+# --- BESTELLMANAGEMENT ---
+
 async def confirm_order(order_id: str):
-    """Schließt eine Bestellung ab und entnimmt das erste Item aus dem Lager."""
-    # 1. Order laden
+    """Schließt Bestellung ab und liefert Ware aus."""
     order_res = db.table("orders").select("*").eq("id", order_id).single().execute()
     if not order_res.data:
         return None
@@ -82,7 +105,6 @@ async def confirm_order(order_id: str):
     order = order_res.data
     product_id = order["product_id"]
     
-    # 2. Produkt laden
     product_res = db.table("products").select("content").eq("id", product_id).single().execute()
     if not product_res.data:
         return None
@@ -93,7 +115,6 @@ async def confirm_order(order_id: str):
     if not items:
         return "sold_out"
 
-    # 3. Erstes Item nehmen und Rest zurückspeichern
     item_to_send = items[0]
     remaining_content = "\n".join(items[1:])
     
@@ -102,16 +123,12 @@ async def confirm_order(order_id: str):
     
     return item_to_send
 
-async def delete_product(product_id: str, owner_id: int):
-    """Löscht ein Produkt permanent."""
-    db.table("products").delete().eq("id", product_id).eq("owner_id", owner_id).execute()
-
-async def create_order(buyer_id: int, product_id: str, seller_id: int):
-    """Erstellt eine neue Bestellung mit Status 'pending'."""
+async def create_order(buyer_id: int, product_id: int, seller_id: int):
+    """Erstellt eine neue Bestellung."""
     data = {
         "buyer_id": buyer_id,
-        "product_id": product_id,
-        "seller_id": seller_id,
+        "product_id": int(product_id),
+        "seller_id": int(seller_id),
         "status": "pending"
     }
     response = db.table("orders").insert(data).execute()
